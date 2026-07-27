@@ -9,7 +9,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Initialize session state for data persistence
+# Initialize session state
 if "df" not in st.session_state:
     st.session_state.df = None
 if "history" not in st.session_state:
@@ -28,6 +28,13 @@ def generate_sample_data():
     }
     return pd.DataFrame(data)
 
+def find_column_by_name(df, name):
+    """Safely finds a column name regardless of uppercase or lowercase matching."""
+    for col in df.columns:
+        if str(col).strip().lower() == name.lower():
+            return col
+    return None
+
 def analyze_dataset(df):
     """Performs automated data health check and computes score."""
     issues = []
@@ -36,7 +43,7 @@ def analyze_dataset(df):
     # 1. Missing values
     missing_count = df.isnull().sum().sum()
     if missing_count > 0:
-        issues.append({"type": "Critical", "msg": f"{missing_count} missing values detected.", "fix": "impute_missing"})
+        issues.append({"type": "Critical", "msg": f"{missing_count} missing values detected across dataset.", "fix": "impute_missing"})
         score -= 15
 
     # 2. Duplicate rows
@@ -45,25 +52,46 @@ def analyze_dataset(df):
         issues.append({"type": "High", "msg": f"{dupes} duplicate row(s) found.", "fix": "remove_duplicates"})
         score -= 20
 
-    # 3. Negative numeric values where unexpected
-    if "Age" in df.columns and (df["Age"] < 0).any():
-        issues.append({"type": "Critical", "msg": "Negative values detected in 'Age' column.", "fix": "fix_negative_age"})
+    # 3. Negative numeric values in Age column
+    age_col = find_column_by_name(df, "age")
+    if age_col and (pd.to_numeric(df[age_col], errors='coerce') < 0).any():
+        issues.append({"type": "Critical", "msg": f"Negative values detected in '{age_col}' column.", "fix": "fix_negative_age"})
         score -= 15
 
     # 4. Text whitespace issues
-    if "Full Name" in df.columns:
-        whitespace_count = df["Full Name"].dropna().apply(lambda x: x != x.strip()).sum()
+    name_col = find_column_by_name(df, "full name") or find_column_by_name(df, "name")
+    if name_col:
+        whitespace_count = df[name_col].dropna().astype(str).apply(lambda x: x != x.strip()).sum()
         if whitespace_count > 0:
-            issues.append({"type": "Low", "msg": f"{whitespace_count} names have leading/trailing whitespace.", "fix": "trim_names"})
+            issues.append({"type": "Low", "msg": f"{whitespace_count} entries in '{name_col}' have leading/trailing whitespace.", "fix": "trim_names"})
             score -= 10
 
     return max(0, score), issues
+
+# --- Safe Fix Helpers ---
+def safe_fix_negative_age(df):
+    age_col = find_column_by_name(df, "age")
+    if age_col:
+        df[age_col] = pd.to_numeric(df[age_col], errors='coerce')
+        df[age_col] = df[age_col].apply(lambda x: abs(x) if pd.notnull(x) else x)
+
+def safe_fix_trim_names(df):
+    name_col = find_column_by_name(df, "full name") or find_column_by_name(df, "name")
+    if name_col:
+        df[name_col] = df[name_col].astype(str).str.strip()
+
+def safe_fix_impute_missing(df):
+    for col in df.columns:
+        if pd.api.types.is_numeric_dtype(df[col]):
+            df[col] = df[col].fillna(df[col].median())
+        else:
+            df[col] = df[col].fillna("Unknown")
 
 # --- UI Layout ---
 st.title("📊 DataGrammarly AI Assistant")
 st.markdown("Proactively analyze, clean, and score your structured datasets like Grammarly.")
 
-# Sidebar - Ingestion & Controls
+# Sidebar Controls
 with st.sidebar:
     st.header("📁 Data Source")
     upload_option = st.radio("Choose source:", ["Use Sample Messy Data", "Upload CSV"])
@@ -101,17 +129,13 @@ with st.sidebar:
                             st.session_state.df = st.session_state.df.drop_duplicates()
                             st.session_state.history.append("Removed duplicate rows.")
                         elif issue["fix"] == "impute_missing":
-                            for col in st.session_state.df.columns:
-                                if st.session_state.df[col].dtype in [np.float64, np.int64]:
-                                    st.session_state.df[col] = st.session_state.df[col].fillna(st.session_state.df[col].median())
-                                else:
-                                    st.session_state.df[col] = st.session_state.df[col].fillna("Unknown")
+                            safe_fix_impute_missing(st.session_state.df)
                             st.session_state.history.append("Imputed missing values.")
                         elif issue["fix"] == "fix_negative_age":
-                            st.session_state.df["Age"] = st.session_state.df["Age"].apply(lambda x: abs(x) if pd.notnull(x) else x)
+                            safe_fix_negative_age(st.session_state.df)
                             st.session_state.history.append("Converted negative ages to absolute values.")
                         elif issue["fix"] == "trim_names":
-                            st.session_state.df["Full Name"] = st.session_state.df["Full Name"].str.strip()
+                            safe_fix_trim_names(st.session_state.df)
                             st.session_state.history.append("Trimmed trailing/leading spaces in names.")
                         st.rerun()
                 with col2:
@@ -120,9 +144,9 @@ with st.sidebar:
         
         if st.button("Apply All Fixes"):
             st.session_state.df = st.session_state.df.drop_duplicates()
-            st.session_state.df["Age"] = st.session_state.df["Age"].apply(lambda x: abs(x) if pd.notnull(x) else x)
-            if "Full Name" in st.session_state.df.columns:
-                st.session_state.df["Full Name"] = st.session_state.df["Full Name"].str.strip()
+            safe_fix_negative_age(st.session_state.df)
+            safe_fix_trim_names(st.session_state.df)
+            safe_fix_impute_missing(st.session_state.df)
             st.session_state.history.append("Applied all automated cleanups.")
             st.success("All fixes applied successfully!")
             st.rerun()
