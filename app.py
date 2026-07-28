@@ -1,6 +1,5 @@
- import streamlit as st
+import streamlit as st
 import pandas as pd
-import numpy as np
 
 # Page setup
 st.set_page_config(page_title="DataGrammarly Assistant", page_icon="✨", layout="wide")
@@ -78,13 +77,6 @@ def analyze_data(df):
 
     return max(0, score), issues
 
-def refresh_page():
-    """Forces Streamlit to rerun cleanly across all versions."""
-    if hasattr(st, "rerun"):
-        st.rerun()
-    elif hasattr(st, "experimental_rerun"):
-        st.experimental_rerun()
-
 # App Header
 st.title("✨ DataGrammarly Assistant")
 st.caption("Professional AI Data Cleaner & Quality Monitor")
@@ -94,7 +86,7 @@ uploaded = st.file_uploader("Upload CSV File", type=["csv"])
 if uploaded is not None and st.session_state.df is None:
     st.session_state.df = pd.read_csv(uploaded)
     st.session_state.history = ["Uploaded new CSV dataset."]
-    refresh_page()
+    st.rerun()
 
 # Main App Experience
 if st.session_state.df is not None:
@@ -150,14 +142,12 @@ if st.session_state.df is not None:
                 # Overwrite session state with cleaned data
                 st.session_state.df = cleaned_df
                 st.session_state.history.append("Fixed all duplicate, missing, and formatting issues.")
-                
-                # Force refresh to immediately update UI
-                refresh_page()
+                st.rerun()
 
         if st.button("🔄 Reset Data", use_container_width=True):
             st.session_state.df = None
             st.session_state.history = []
-            refresh_page()
+            st.rerun()
 
     # Main Dataset Display
     tab1, tab2 = st.tabs(["📋 Data Preview", "📜 Audit Log"])
